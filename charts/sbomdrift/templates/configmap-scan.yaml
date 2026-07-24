@@ -1,0 +1,51 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sbomdrift.fullname" . }}-scan
+  labels:
+    {{- include "sbomdrift.labels" . | nindent 4 }}
+data:
+  # The scan lives in a ConfigMap rather than baked into the image so it can be
+  # read and changed without a rebuild. The image supplies the tools; the chart
+  # supplies the policy.
+  scan.sh: |
+    #!/usr/bin/env bash
+    # Fail on error, on unset variables, and on any failure inside a pipeline --
+    # without pipefail, `syft ... | tee` would report success when syft died.
+    set -euo pipefail
+
+    FLEET=({{ range .Values.fleet }}{{ . | quote }} {{ end }})
+    WORK="$(mktemp -d)"
+    trap 'rm -rf "$WORK"' EXIT
+
+    echo "== scanning ${#FLEET[@]} image(s) =="
+    for image in "${FLEET[@]}"; do
+      # `registry:` forces syft to read from the registry API. Without it syft
+      # looks for a local Docker daemon first, and this pod deliberately has no
+      # socket mounted -- a scanner does not need the host's container runtime.
+      echo "-- ${image}"
+      syft "registry:${image}" -o cyclonedx-json="${WORK}/sbom.json" --quiet
+      sbomdrift ingest "${WORK}/sbom.json" --artefact "${image}"
+      # Deliberately unlabelled. A label is unique across the database, so
+      # labelling by date would make the second image of the day collide, and
+      # re-running after a failure collide with the run that half-succeeded. The
+      # metrics only ever read the newest live evaluation, which needs no name.
+      sbomdrift eval --artefact "${image}"
+    done
+
+    echo "== publishing metrics =="
+    sbomdrift metrics -o "${WORK}/metrics.prom"
+    cat "${WORK}/metrics.prom"
+
+    {{- if .Values.pushgateway.enabled }}
+    # --fail turns an HTTP error into a non-zero exit. Without it curl reports
+    # success after printing the gateway's error page, and the job goes green
+    # while nothing was published.
+    curl --fail --silent --show-error \
+      --data-binary "@${WORK}/metrics.prom" \
+      "{{ .Values.pushgateway.url }}/metrics/job/{{ .Values.pushgateway.job }}"
+    echo "metrics pushed"
+    {{- else }}
+    echo "pushgateway disabled; metrics printed above only"
+    {{- end }}

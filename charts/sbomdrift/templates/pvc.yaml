@@ -1,0 +1,25 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sbomdrift.fullname" . }}-history
+  labels:
+    {{- include "sbomdrift.labels" . | nindent 4 }}
+  annotations:
+    # The history is the product. Deleting the release should not silently throw
+    # away months of drift data along with it.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    # ReadWriteOnce, deliberately. The volume holds a SQLite file, and SQLite's
+    # locking does not survive two writers on different nodes. The CronJob's
+    # concurrencyPolicy: Forbid is the other half of that same decision.
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}

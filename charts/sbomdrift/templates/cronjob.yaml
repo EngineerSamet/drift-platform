@@ -1,0 +1,85 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "sbomdrift.fullname" . }}
+  labels:
+    {{- include "sbomdrift.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  # A scan is periodic and finite, so it is a CronJob rather than a Deployment.
+  # Modelling it as a long-running pod would mean writing a scheduler that
+  # Kubernetes already has, and paying for a container that idles all day.
+  concurrencyPolicy: {{ .Values.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.failedJobsHistoryLimit }}
+  # If the cluster was down at 02:00, run once on recovery rather than firing
+  # every missed schedule at the OSV API at the same moment.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "sbomdrift.selectorLabels" . | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: scan
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.containerSecurityContext | nindent 16 }}
+              command: ["/bin/bash", "/scripts/scan.sh"]
+              env:
+                - name: SBOMDRIFT_DB
+                  value: /data/history.db
+                # syft writes its cache somewhere writable; the root filesystem
+                # is read-only, so point both it and HOME at the scratch volume.
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              volumeMounts:
+                - name: history
+                  mountPath: /data
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                # readOnlyRootFilesystem is on, so every path the job writes to
+                # has to be an explicit volume. That is the point of the setting:
+                # what the workload may write is declared rather than assumed.
+                - name: scratch
+                  mountPath: /tmp
+          volumes:
+            - name: history
+              {{- if .Values.persistence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ include "sbomdrift.fullname" . }}-history
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+            - name: scripts
+              configMap:
+                name: {{ include "sbomdrift.fullname" . }}-scan
+                defaultMode: 0555
+            - name: scratch
+              emptyDir: {}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

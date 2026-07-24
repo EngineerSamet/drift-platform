@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v2
+name: sbomdrift
+description: Scheduled SBOM drift scanning, with its results published as Prometheus metrics.
+type: application
+
+# The chart version moves when the packaging changes; appVersion tracks the
+# sbomdrift release being run. They are separate on purpose -- a fix to a
+# resource limit is not a new version of the tool.
+version: 0.1.0
+appVersion: "0.1.3"
+
+home: https://github.com/EngineerSamet/sbomdrift
+sources:
+  - https://github.com/EngineerSamet/sbomdrift
+keywords:
+  - sbom
+  - supply-chain
+  - vulnerability
+  - drift
+maintainers:
+  - name: Samet Şanlıkan

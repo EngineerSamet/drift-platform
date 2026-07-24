@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# A deliberately small monitoring stack for a single-node learning cluster.
+# Everything that would matter on a real cluster and only costs resources here
+# is turned off, and the reason is stated rather than left as a silent default.
+
+# One replica of everything. This is a k3d cluster on a laptop; HA would buy
+# nothing and cost memory the node does not have to spare.
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 400Mi
+      limits:
+        memory: 1Gi
+    # Scrape PrometheusRule and ServiceMonitor objects from every namespace,
+    # not only those carrying a matching release label. On a small cluster the
+    # label ceremony is friction with no payoff.
+    ruleSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+
+grafana:
+  # A fixed password so the dashboard can be reached without hunting through a
+  # secret. Fine for a local learning cluster; on a real one this would be a
+  # sealed secret and the reason it is not is written here on purpose.
+  adminPassword: admin
+  defaultDashboardsEnabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  # The dashboard sidecar imports any ConfigMap labelled grafana_dashboard,
+  # from any namespace. This is what lets the drift dashboard live in git as a
+  # ConfigMap rather than being clicked together in the UI and lost on restart.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+
+# Alertmanager stays on -- the whole point of the exercise is an alert that
+# fires -- but with the footprint of a single-node cluster.
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+
+# Off on k3d. These exporters watch control-plane components that k3s bundles
+# into a single process and does not expose on the ports the charts expect, so
+# leaving them on produces nothing but permanently-red "target down" alerts.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false

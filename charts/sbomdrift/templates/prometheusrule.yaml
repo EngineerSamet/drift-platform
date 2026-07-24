@@ -1,0 +1,55 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "sbomdrift.fullname" . }}
+  labels:
+    {{- include "sbomdrift.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: sbomdrift
+      rules:
+        # The alert the tool exists for: something that was not critical
+        # yesterday is critical today, without the image having been rebuilt.
+        - alert: SbomdriftNewCriticalFinding
+          expr: increase(sbomdrift_findings{severity="CRITICAL"}[1d]) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'New CRITICAL vulnerability in {{ "{{" }} $labels.artefact {{ "}}" }}'
+            description: >-
+              {{ "{{" }} $value | printf "%.0f" {{ "}}" }} new CRITICAL finding(s) appeared in
+              {{ "{{" }} $labels.artefact {{ "}}" }} in the last day. The artefact did not
+              necessarily change; the advisory data did.
+
+        # The failure that is easiest to miss. A scan that silently stops
+        # reports no vulnerabilities at all, which looks exactly like good news.
+        # Pushgateway keeps serving the last value forever, so absence of the
+        # metric is not the signal -- its age is.
+        - alert: SbomdriftScanStale
+          expr: time() - sbomdrift_last_evaluation_timestamp_seconds > 172800
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'sbomdrift has not scanned {{ "{{" }} $labels.artefact {{ "}}" }} for two days'
+            description: >-
+              The schedule is daily. Two missed runs means the dashboard is
+              showing a stale picture while appearing healthy.
+
+        - alert: SbomdriftNeverEvaluated
+          expr: sbomdrift_never_evaluated > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ "{{" }} $labels.artefact {{ "}}" }} was ingested but never evaluated'
+            description: >-
+              An inventory exists with no evaluation behind it, so this artefact
+              contributes nothing to the drift picture.
+{{- end }}

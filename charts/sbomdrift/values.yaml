@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: Apache-2.0
+
+image:
+  repository: sbomdrift-scan
+  tag: "0.1.3"
+  pullPolicy: IfNotPresent
+
+# 02:00 daily. The job re-evaluates a component set that has not changed, which
+# is the whole point: what moves is the advisory data, not the artefact.
+schedule: "0 2 * * *"
+
+# Images to scan. Each is pulled straight from its registry by syft -- no Docker
+# socket is mounted, because handing a scan job the host's container runtime is
+# a far larger privilege than the task needs.
+fleet:
+  - python:3.11-slim
+  - python:3.11.0-slim
+  - nginx:1.29-alpine
+  - postgres:18-alpine
+
+persistence:
+  enabled: true
+  size: 1Gi
+  # Empty means the cluster default. k3d ships local-path.
+  storageClass: ""
+
+pushgateway:
+  enabled: true
+  # A CronJob cannot be scraped: by the time Prometheus calls, the pod is gone.
+  # Batch jobs push instead. The cost is that the gateway holds the last value
+  # forever, which is why sbomdrift_last_evaluation_timestamp_seconds exists --
+  # staleness stays detectable even though the metric never disappears.
+  url: http://drift-pushgateway-prometheus-pushgateway.observability.svc:9091
+  job: sbomdrift
+
+# Alerting rules are installed as a PrometheusRule, so they live in git beside
+# the thing they watch rather than in a Grafana text box nobody can review.
+prometheusRule:
+  enabled: true
+  # Matches the release label kube-prometheus-stack selects on by default.
+  labels:
+    release: monitoring
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    # No CPU limit on purpose: throttling a batch job makes it slower, not
+    # safer, and the requests already protect the node's schedulable capacity.
+    memory: 1Gi
+
+# Two scans writing one SQLite file would corrupt it, so a slow run must delay
+# the next one rather than race it.
+concurrencyPolicy: Forbid
+successfulJobsHistoryLimit: 3
+failedJobsHistoryLimit: 3
+backoffLimit: 2
+
+# OSV.dev is rate-limited and occasionally slow; a scan that has not finished in
+# an hour is stuck rather than busy.
+activeDeadlineSeconds: 3600
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
