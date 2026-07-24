@@ -19,6 +19,11 @@ result as Prometheus metrics through a Pushgateway. Grafana draws the drift over
 time; Prometheus alerting rules fire when something new turns critical, or when
 the scan itself goes quiet.
 
+![The drift dashboard, live on k3d](docs/dashboard.png)
+
+*Live from a real run: `python:3.11.0-slim` carrying 6 CRITICAL and 160 total
+findings, `alpine:3.22` clean, and the age of each artefact's last scan.*
+
 ```
         CronJob (nightly)
    syft → ingest → eval → metrics
